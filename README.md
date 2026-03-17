@@ -16,7 +16,6 @@
     * **Greedy Garbage Collection:** 採用 貪婪演算法 選取有效頁面最少的 Block 作為回收對象。
     * **DMA 硬體搬移加速:** * 使用 DMA 處理資料搬移，大幅降低 CPU 負載。
 **4. Visual Debugging:** 
-透過板載四向 LED 實時監控各通道狀態：
     * 🟢 左燈 (Green)：Channel 0 - Host 寫入中
 
     * 🟠 上燈 (Orange)：Channel 1 - Host 寫入中
