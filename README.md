@@ -23,28 +23,3 @@
     * 🔴 右燈 (Red)：Channel 0 - 後台 GC 搬移中
 
     * 🔵 下燈 (Blue)：Channel 1 - 後台 GC 搬移中
-
-graph TD
-    subgraph Host_Interface [前端介面]
-        A[Host Write Request] -->|LBA Striping| B{Channel Router}
-    end
-
-    subgraph RTOS_Tasks [FreeRTOS 任務調度]
-        B -->|High Priority| C[Host Task]
-        D[Background GC Task] -->|Low Priority| E[GC Engine]
-    end
-
-    subgraph Channel_Logic [多通道 Flash 管理]
-        C --> Ch0[Channel 0 Manager]
-        C --> Ch1[Channel 1 Manager]
-        E --> Ch0
-        E --> Ch1
-    end
-
-    subgraph Hardware [STM32 硬體層]
-        Ch0 --> DMA[DMA2 Acceleration]
-        Ch1 --> DMA
-        DMA --> SRAM[Simulated Flash in SRAM]
-        Ch0 --> LED[LED Status Monitor]
-        Ch1 --> LED
-    end
