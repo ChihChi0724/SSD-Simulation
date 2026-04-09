@@ -25,9 +25,11 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -69,41 +71,22 @@ const osThreadAttr_t GCTask_attributes = {
   .priority = (osPriority_t) osPriorityLow,
 };
 /* USER CODE BEGIN PV */
-/*
-#define PAGES_PER_BLOCK 4
-#define TOTAL_BLOCKS 16
-#define PAGE_SIZE 512
-
-typedef struct {
-    bool page_status[PAGES_PER_BLOCK];
-    int valid_page_count;
-    bool is_erased;
-    int lba_mapping[PAGES_PER_BLOCK];
-    uint8_t data_content[PAGES_PER_BLOCK][PAGE_SIZE];
-} BlockStatus;
-
-BlockStatus flash[TOTAL_BLOCKS];
-int L2P_Table[64];
-
-int free_block_list[TOTAL_BLOCKS];
-int fb_head = 0, fb_tail = 0, fb_count = 0;
-
-int curr_block = -1;
-int curr_page = 0;
-*/
 #define NUM_CHANNELS    2
 #define BLOCKS_PER_CH   5
 #define PAGES_PER_BLOCK 4
-#define PAGE_SIZE       512
+#define PAGE_SIZE       128
 #define TOTAL_LBA       20
 #define TOTAL_BLOCKS    10
+
+#define Reverse_BIT(x, n) ((x) ^= (1UL << (n)))
+#define Check_BIT(x, n) (((x) >> (n)) & 1UL)
 
 typedef struct {
     bool page_status[PAGES_PER_BLOCK];
     int valid_page_count;
     bool is_erased;
     int lba_mapping[PAGES_PER_BLOCK];
-    uint8_t data_content[PAGES_PER_BLOCK][PAGE_SIZE];
+    uint16_t data_content[PAGES_PER_BLOCK][PAGE_SIZE];
 } BlockStatus;
 
 typedef struct {
@@ -159,19 +142,6 @@ void HAL_DMA_XferCpltCallback(DMA_HandleTypeDef *_hdma) {
 }
 
 void move_page_with_dma(uint32_t src_addr, uint32_t dest_addr, uint32_t size) {
-	/*
-    dma_transfer_complete = false;
-
-    HAL_DMA_Start_IT(&hdma_memtomem_dma2_stream0, src_addr, dest_addr, size/4);
-
-    while(!dma_transfer_complete);
-    */
-
-	/*
-	memcpy((void*)dest_addr, (void*)src_addr, size);
-	dma_transfer_complete = true;
-	*/
-
 	dma_transfer_complete = false;
 
 	if (HAL_DMA_Start_IT(&hdma_memtomem_dma2_stream0, src_addr, dest_addr, size/4) != HAL_OK) {
@@ -185,6 +155,82 @@ void move_page_with_dma(uint32_t src_addr, uint32_t dest_addr, uint32_t size) {
 	if (timeout == 0) {
 	    printf("  [DMA Timeout] Interrupt not received!\n");
 	}
+}
+
+void printData(uint16_t n) {
+    for (int i = 14; i >= 0; i--) {
+        if (Check_BIT(n, i)) {
+            printf("1");
+        }
+        else {
+            printf("0");
+        }
+    }
+    printf(" (%d)\n", n);
+}
+
+uint16_t encode_hamming_11(uint16_t data) {
+    uint16_t d = data;
+    uint16_t code = 0;
+
+    // data bit location: 3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15
+    uint8_t p1 = (Check_BIT(d, 0)) ^ (Check_BIT(d, 1)) ^ (Check_BIT(d, 3)) ^ (Check_BIT(d, 4)) ^ (Check_BIT(d, 6)) ^ (Check_BIT(d, 8)) ^ (Check_BIT(d, 10));
+    uint8_t p2 = (Check_BIT(d, 0)) ^ (Check_BIT(d, 2)) ^ (Check_BIT(d, 3)) ^ (Check_BIT(d, 5)) ^ (Check_BIT(d, 6)) ^ (Check_BIT(d, 9)) ^ (Check_BIT(d, 10));
+    uint8_t p4 = (Check_BIT(d, 1)) ^ (Check_BIT(d, 2)) ^ (Check_BIT(d, 3)) ^ (Check_BIT(d, 7)) ^ (Check_BIT(d, 8)) ^ (Check_BIT(d, 9)) ^ (Check_BIT(d, 10));
+    uint8_t p8 = (Check_BIT(d, 4)) ^ (Check_BIT(d, 5)) ^ (Check_BIT(d, 6)) ^ (Check_BIT(d, 7)) ^ (Check_BIT(d, 8)) ^ (Check_BIT(d, 9)) ^ (Check_BIT(d, 10));
+
+    code |= (p1 << 0);
+    code |= (p2 << 1);
+    code |= (Check_BIT(d, 0) << 2);
+    code |= (p4 << 3);
+    code |= (Check_BIT(d, 1) << 4);
+    code |= (Check_BIT(d, 2) << 5);
+    code |= (Check_BIT(d, 3) << 6);
+    code |= (p8 << 7);
+    code |= (Check_BIT(d, 4) << 8);
+    code |= (Check_BIT(d, 5) << 9);
+    code |= (Check_BIT(d, 6) << 10);
+    code |= (Check_BIT(d, 7) << 11);
+    code |= (Check_BIT(d, 8) << 12);
+    code |= (Check_BIT(d, 9) << 13);
+    code |= (Check_BIT(d, 10) << 14);
+
+    return code;
+}
+
+void inject_random_error(uint16_t* data) {
+    int chance = rand() % 100;
+
+    if (chance < 30) { // 30% chance error
+        int bit_to_flip = rand() % 15;
+        Reverse_BIT(*data, bit_to_flip);
+    }
+}
+
+void verify_and_repair(uint16_t* received_data) {
+    uint8_t syndrome = 0;
+
+    for (int i = 0; i < 15; i++) {
+        if (Check_BIT(*received_data, i)) {
+            syndrome ^= (i + 1);
+        }
+    }
+
+    if (syndrome == 0) {
+        printf("  [ECC] Data is clean: ");
+        printData(*received_data);
+    } else {
+    	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_SET);   // bottom
+
+        printf("  [ECC] Error detected at Bit %d: ", syndrome - 1);
+        printData(*received_data);
+
+        printf("  [ECC] Repairing bit...\n");
+        Reverse_BIT(*received_data, (syndrome - 1));
+
+        osDelay(200);
+        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_15, GPIO_PIN_RESET);
+    }
 }
 
 int get_channel_index(int lba) {
@@ -205,22 +251,6 @@ void decode_addr(int addr, int *ch, int *blk, int *pg) {
     *pg  = addr & 0xFF;
 }
 
-/*
-void push_free_block(int b_idx) {
-    free_block_list[fb_tail] = b_idx;
-    fb_tail = (fb_tail + 1) % TOTAL_BLOCKS;
-    fb_count++;
-}
-
-int pop_free_block() {
-    if (fb_count == 0) return -1;
-    int b_idx = free_block_list[fb_head];
-    fb_head = (fb_head + 1) % TOTAL_BLOCKS;
-    fb_count--;
-    return b_idx;
-}
-*/
-
 void push_free_block(int ch_idx, int b_idx) {
 	Channel *ch = &channels[ch_idx];
 
@@ -239,26 +269,6 @@ int pop_free_block(int ch_idx) {
     return b_idx;
 }
 
-/*
-void init_ssd() {
-	printf("FTL Start!\r\n");
-    for (int i = 0; i < 64; i++) L2P_Table[i] = -1;
-    for (int i = 0; i < TOTAL_BLOCKS; i++) {
-        flash[i].is_erased = true;
-        flash[i].valid_page_count = 0;
-
-        for (int p = 0; p < PAGES_PER_BLOCK; p++) {
-            flash[i].page_status[p] = false;
-            flash[i].lba_mapping[p] = -1;
-
-            memset(flash[i].data_content[p], 0xFF, PAGE_SIZE);
-        }
-
-        push_free_block(i);
-    }
-}
-*/
-
 void init_ssd() {
 	for (int i = 0; i < TOTAL_LBA; i++) L2P_Table[i] = -1;
     for (int i = 0; i < NUM_CHANNELS; i++) {
@@ -273,20 +283,18 @@ void init_ssd() {
             push_free_block(i, j);
             channels[i].flash[j].is_erased = true;
             channels[i].flash[j].valid_page_count = 0;
+
+            for (int p = 0; p < PAGES_PER_BLOCK; p++) {
+            	channels[i].flash[j].page_status[p] = false;
+            	channels[i].flash[j].lba_mapping[p] = -1;
+
+            	for (int k = 0; k < PAGE_SIZE; k++) {
+            		channels[i].flash[j].data_content[p][k] = 0xFFFF;
+            	}
+            }
         }
     }
 }
-
-/*
-int get_next_write_addr(int *curr_b, int *curr_p) {
-    if (*curr_b == -1 || *curr_p >= PAGES_PER_BLOCK) {
-        *curr_b = pop_free_block();
-        *curr_p = 0;
-        if (*curr_b == -1) return -1;
-    }
-    return (*curr_b) * PAGES_PER_BLOCK + (*curr_p)++;
-}
-*/
 
 int get_next_write_addr(int ch_idx) {
     Channel *ch = &channels[ch_idx];
@@ -316,22 +324,6 @@ int get_next_write_addr(int ch_idx) {
     return addr;
 }
 
-/*
-void invalidate_old_data(int old_physical_addr) {
-    if (old_physical_addr == -1) return;
-
-    int b_idx = old_physical_addr / PAGES_PER_BLOCK;
-    int p_idx = old_physical_addr % PAGES_PER_BLOCK;
-
-    if (flash[b_idx].page_status[p_idx]) {
-        flash[b_idx].page_status[p_idx] = false;
-        flash[b_idx].valid_page_count--;
-        printf("  [L2P] Invalidate Old Addr: %d. Block %d Valid Pages left: %d\n",
-                old_physical_addr, b_idx, flash[b_idx].valid_page_count);
-    }
-}
-*/
-
 void invalidate_old_data(int old_physical_addr) {
     if (old_physical_addr == -1) return;
 
@@ -353,85 +345,14 @@ void invalidate_old_data(int old_physical_addr) {
     }
 }
 
-/*
-void run_gc(int *curr_b, int *curr_p) {
-    int victim = -1;
-    int min_valid = PAGES_PER_BLOCK;
-
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET);
-
-
-    // for (int i = 0; i < TOTAL_BLOCKS; i++) {
-        // if (!flash[i].is_erased && i != *curr_b && flash[i].valid_page_count < min_valid) {
-            // min_valid = flash[i].valid_page_count;
-            // victim = i;
-        // }
-    // }
-
-
-    for (int i = 0; i < TOTAL_BLOCKS; i++) {
-        if (!flash[i].is_erased && i != *curr_b && flash[i].valid_page_count > 0) {
-            if (flash[i].valid_page_count < min_valid) {
-                min_valid = flash[i].valid_page_count;
-                victim = i;
-            }
-        }
-    }
-
-    if (min_valid > 2) {
-        printf("  [GC Skip] No block with fewer than 3 valid pages. Skip GC.\n");
-        victim = -1;
-    }
-
-    if (victim != -1) {
-    	printf("\n[GC] Triggered! Victim: Block %d, Migrating %d valid pages...\n", victim, min_valid);
-
-        for (int p = 0; p < PAGES_PER_BLOCK; p++) {
-            if (flash[victim].page_status[p]) {
-                int lba = flash[victim].lba_mapping[p];
-
-                int new_addr = get_next_write_addr(curr_b, curr_p);
-                int new_b = new_addr / PAGES_PER_BLOCK;
-                int new_p = new_addr % PAGES_PER_BLOCK;
-
-                move_page_with_dma((uint32_t)&flash[victim].data_content[p][0],
-                                (uint32_t)&flash[new_b].data_content[new_p][0],
-                                PAGE_SIZE);
-
-                L2P_Table[lba] = new_addr;
-
-                printf("  [MOVE] LBA %d: Addr %d -> %d\n", lba, (victim * 4 + p), new_addr);
-            }
-        }
-
-
-        flash[victim].valid_page_count = 0;
-        flash[victim].is_erased = true;
-        for (int p = 0; p < PAGES_PER_BLOCK; p++) {
-            flash[victim].page_status[p] = false;
-            memset(flash[victim].data_content[p], 0xFF, PAGE_SIZE);
-        }
-
-        push_free_block(victim);
-        printf("[GC] Block %d Erased & Recycled to Free List.\n\n", victim);
-        HAL_Delay(500);
-    }
-    else {
-        printf("  [GC Skip] No suitable victim found.\n");
-    }
-
-    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
-}
-*/
-
 void run_gc_specific_channel(int ch_idx) {
     int victim = -1;
     int min_valid = PAGES_PER_BLOCK;
     Channel *ch = &channels[ch_idx];
 
-    uint16_t gc_led = (ch_idx == 0) ? GPIO_PIN_14 : GPIO_PIN_15; // Ch0 right, Ch1 bottom
-        HAL_GPIO_WritePin(GPIOD, gc_led, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_SET); // right
 
+    /*
     for (int i = 0; i < BLOCKS_PER_CH; i++) {
         if (!ch->flash[i].is_erased && i != ch->curr_block && ch->flash[i].valid_page_count > 0) {
             if (ch->flash[i].valid_page_count < min_valid) {
@@ -441,13 +362,19 @@ void run_gc_specific_channel(int ch_idx) {
         }
     }
 
-    // Greedy Policy
-    /*
     if (victim != -1 && min_valid > 2) {
         printf("  [Ch %d GC Skip] No block with fewer than 3 valid pages.\n", ch_idx);
         victim = -1;
     }
     */
+
+    // Greedy Policy
+    for (int i = 0; i < BLOCKS_PER_CH; i++) {
+        if (!ch->flash[i].is_erased && i != ch->curr_block && ch->flash[i].valid_page_count < min_valid) {
+            min_valid = ch->flash[i].valid_page_count;
+            victim = i;
+        }
+    }
 
     if (victim != -1) {
         printf("\n[Ch %d GC] Triggered! Victim: Block %d, Migrating %d valid pages...\n",
@@ -459,13 +386,16 @@ void run_gc_specific_channel(int ch_idx) {
 
                 int new_addr = get_next_write_addr(ch_idx);
 
+                uint16_t* received_data = &channels[ch_idx].flash[victim].data_content[p][0];
+                verify_and_repair(received_data);
+
                 if (new_addr != -1) {
                     int n_ch, n_blk, n_pg;
                     decode_addr(new_addr, &n_ch, &n_blk, &n_pg);
 
                     move_page_with_dma((uint32_t)&ch->flash[victim].data_content[p][0],
                                     (uint32_t)&channels[n_ch].flash[n_blk].data_content[n_pg][0],
-                                    PAGE_SIZE);
+									PAGE_SIZE * sizeof(uint16_t));
 
                     channels[n_ch].flash[n_blk].page_status[n_pg] = true;
                     channels[n_ch].flash[n_blk].lba_mapping[n_pg] = lba;
@@ -482,59 +412,28 @@ void run_gc_specific_channel(int ch_idx) {
         ch->flash[victim].is_erased = true;
         for (int p = 0; p < PAGES_PER_BLOCK; p++) {
             ch->flash[victim].page_status[p] = false;
-            memset(ch->flash[victim].data_content[p], 0xFF, PAGE_SIZE);
+            for (int k = 0; k < PAGE_SIZE; k++) {
+            	ch->flash[victim].data_content[p][k] = 0xFFFF;
+            }
         }
 
         push_free_block(ch_idx, victim);
         printf("[Ch %d GC] Block %d Erased & Recycled.\n\n", ch_idx, victim);
-        HAL_Delay(500);
     } else {
-        printf("  [Ch %d GC Skip] No suitable victim found.\n", ch_idx);
+        printf("[Ch %d GC Skip] No suitable victim found.\n", ch_idx);
     }
 
-    osDelay(100);
-    HAL_GPIO_WritePin(GPIOD, gc_led, GPIO_PIN_RESET);
+    osDelay(500);
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_14, GPIO_PIN_RESET);
 }
 
-/*
-void host_write(int lba, uint8_t *input_data, int *curr_b, int *curr_p) {
-	printf("Host Write Request: LBA %d...\n", lba);
-
-    invalidate_old_data(L2P_Table[lba]);
-
-    if (fb_count < 2) {
-    	printf("\n[WARNING] Free blocks below threshold! Pre-launching GC...\n");
-        run_gc(curr_b, curr_p);
-    }
-
-    int new_addr = get_next_write_addr(curr_b, curr_p);
-
-    L2P_Table[lba] = new_addr;
-
-    int b_idx = new_addr / PAGES_PER_BLOCK;
-    int p_idx = new_addr % PAGES_PER_BLOCK;
-    flash[b_idx].page_status[p_idx] = true;
-    flash[b_idx].lba_mapping[p_idx] = lba;
-    flash[b_idx].valid_page_count++;
-    flash[b_idx].is_erased = false;
-
-    memcpy(flash[b_idx].data_content[p_idx], input_data, PAGE_SIZE);
-
-    printf("  [L2P] LBA %d -> PhysAddr %d (Block %d, Page %d)\n", lba, new_addr, b_idx, p_idx);
-}
-*/
-
-void host_write(int lba, uint8_t *input_data) {
-    int ch_idx = lba % NUM_CHANNELS;
+void host_write(int lba, uint16_t *input_data) {
+    int ch_idx = get_channel_index(lba);
     Channel *ch = &channels[ch_idx];
 
-    if (ch_idx == 0) {
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);   // left
-    } else {
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);   // top
-    }
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_SET);   // left
 
-    printf("Host Write Request: LBA %d (Routing to Ch %d)...\n", lba, ch_idx);
+    printf("[Write] Host Write Request: LBA %d (Routing to Ch %d)...\n", lba, ch_idx);
 
     invalidate_old_data(L2P_Table[lba]);
 
@@ -549,8 +448,7 @@ void host_write(int lba, uint8_t *input_data) {
         ch->flash[b_idx].valid_page_count++;
         ch->flash[b_idx].is_erased = false;
 
-        // change move_page_with_dma
-        memcpy(ch->flash[b_idx].data_content[p_idx], input_data, PAGE_SIZE);
+        move_page_with_dma((uint32_t)&input_data[0], (uint32_t)&channels[ch_idx].flash[b_idx].data_content[p_idx][0], PAGE_SIZE * sizeof(uint16_t));
 
         L2P_Table[lba] = new_addr;
 
@@ -560,12 +458,28 @@ void host_write(int lba, uint8_t *input_data) {
         printf("  [ERROR] Channel %d is completely full! Write failed.\n", ch_idx);
     }
 
-    osDelay(10);
-    if (ch_idx == 0) {
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
-    } else {
-        HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
-    }
+    osDelay(400);
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_12, GPIO_PIN_RESET);
+}
+
+void host_read(int lba) {
+	if (L2P_Table[lba] == -1) {
+		printf("[Read] Host Read Request: LBA %d... (no data)\n", lba);
+	    return;
+	}
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_SET);   // top
+
+	int read_physical_addr = L2P_Table[lba];
+	printf("[Read] Host Read Request: LBA %d...\n", lba);
+
+	int ch_idx, b_idx, p_idx;
+	decode_addr(read_physical_addr, &ch_idx, &b_idx, &p_idx);
+	uint16_t* received_data = &channels[ch_idx].flash[b_idx].data_content[p_idx][0];
+
+	verify_and_repair(received_data);
+
+	osDelay(200);
+	HAL_GPIO_WritePin(GPIOD, GPIO_PIN_13, GPIO_PIN_RESET);
 }
 /* USER CODE END 0 */
 
@@ -604,6 +518,7 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   init_ssd();
+  srand(time(NULL));
   printf("--- SSD Simulation System Ready ---\r\n");
   /* USER CODE END 2 */
 
@@ -654,18 +569,7 @@ int main(void)
 
   while (1)
   {
-	  /*
-	  memset(my_test_data, 0xAA, PAGE_SIZE);
-	  my_test_data[0] = (uint8_t)(lba_counter % 64);
 
-	      host_write(lba_counter % 64, my_test_data);
-
-	      lba_counter++;
-
-	      HAL_GPIO_TogglePin(GPIOD, GPIO_PIN_12);
-
-	      HAL_Delay(1000);
-	  */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1008,19 +912,30 @@ void StartDefaultTask(void *argument)
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 5 */
+  static uint16_t my_test_data[PAGE_SIZE];
   /* Infinite loop */
   for(;;)
   {
-	  static uint8_t my_test_data[PAGE_SIZE];
-	  static int lba_counter = 0;
+	  int random_lba = rand() % TOTAL_LBA;
 
-	  memset(my_test_data, 0xAA, PAGE_SIZE);
-	  my_test_data[0] = (uint8_t)(lba_counter % 20);
+	  int action = rand() % 10;
 
-	  host_write(lba_counter % 20, my_test_data);
+	  if (action < 6) { // 60% write
+		  for (int i = 0; i < PAGE_SIZE; i++) {
+			  my_test_data[i] = 0xAAAA;
+		  }
 
-	  lba_counter++;
-	  osDelay(1000);
+		  uint16_t data = 0xAAAA; // 01010101010
+		  my_test_data[0] = encode_hamming_11(data); // 010101011010010;
+
+		  inject_random_error(&my_test_data[0]);
+		  host_write(random_lba, my_test_data);
+	  }
+	  else { // 40% read
+	      host_read(random_lba);
+	  }
+
+	  osDelay(100);
   }
   /* USER CODE END 5 */
 }
@@ -1045,8 +960,6 @@ void StartGCTask(void *argument)
 	          run_gc_specific_channel(i);
 	      }
 	  }
-
-	  osDelay(100);
   }
   /* USER CODE END StartGCTask */
 }
