@@ -21,8 +21,6 @@
     * **Read Reclaim 邏輯:** 在 Host Read 與 GC 搬移過程中強制執行 ECC 檢查，確保數據的正確性。
 * **Visual Debugging:** 
     * 🟢 左燈 (Green)：Host 寫入中
-* **Visual Debugging:** 
-    * 🟢 左燈 (Green)：Channel 0 - Host 寫入中
 
     * 🟠 上燈 (Orange)：Host 讀取中
 
