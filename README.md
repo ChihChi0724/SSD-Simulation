@@ -11,7 +11,7 @@
 * **多通道並行架構 (Multi-channel Striping)**
     * **Modular Striping:** 將 LBA 自動分佈至不同實體 Channel。
     * **獨立的 Free Block Pool 與管理邏輯:** 實現非同步並行處理。
-* **FTL 與GC**
+* **FTL 與 GC**
     * **Page-level Mapping:** 透過動態 L2P Table 進行位址轉換。
     * **Greedy Garbage Collection:** 採用貪婪演算法選取有效頁面最少的 Block 作為回收對象。
     * **DMA 硬體搬移加速:** * 使用 DMA 處理資料搬移，大幅降低 CPU 負載。
