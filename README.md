@@ -14,7 +14,7 @@
 * **FTL 與 GC**
     * **Page-level Mapping:** 透過動態 L2P Table 進行位址轉換。
     * **Greedy Garbage Collection:** 採用貪婪演算法選取有效頁面最少的 Block 作為回收對象。
-    * **DMA 硬體搬移加速:** * 使用 DMA 處理資料搬移，大幅降低 CPU 負載。
+    * **DMA 硬體搬移加速:** 使用 DMA 處理資料搬移，大幅降低 CPU 負載。
 * **全路徑數據保護 (End-to-End Data Protection)**
     * **Hamming Code (SEC) 整合:** 針對每個 Page 實作 Hamming(15, 11)，能在讀取時自動定位並修復 Single-bit Flip。
     * **Error Injection Simulator:** 內建隨機錯誤注入函式，模擬 NAND Flash 因電荷流失或干擾產生的物理錯誤，驗證韌體的自我修復能力。
