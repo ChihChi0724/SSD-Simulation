@@ -122,21 +122,6 @@ void StartGCTask(void *argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#include <stdio.h>
-
-#ifdef __GNUC__
-#define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
-#else
-#define PUTCHAR_PROTOTYPE int fputc(int ch, FILE *f)
-#endif
-
-UART_HandleTypeDef huart2;
-
-int __io_putchar(int ch) {
-    ITM_SendChar(ch);
-    return ch;
-}
-
 void HAL_DMA_XferCpltCallback(DMA_HandleTypeDef *_hdma) {
     dma_transfer_complete = true;
 }
