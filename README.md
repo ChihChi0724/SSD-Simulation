@@ -1,10 +1,10 @@
 # STM32 Multi-Channel SSD Firmware Simulator
 **(基於 STM32 之 Multi-Channel SSD 韌體模擬)**
 
-## 📝 專案簡介 (Project Overview)
+## 專案簡介 (Project Overview)
 本專案在 **STM32F407 (Cortex-M4)** 平台上實作一個的 SSD 韌體模擬器。核心目標是實作 NAND Flash 的底層管理邏輯，核心亮點在於將 **RTOS** 引入 FTL 管理邏輯，實現 **Host 讀取/寫入** 與 **Garbage Collection** 的並行處理，並透過 **Multi-channel Striping** 技術大幅提升 Throughput，除此之外，本專案實作了 **Hamming Code (ECC)** 錯誤偵測與自動修復機制，完整模擬 SSD 從 Host 端寫入、Flash 存放、到位元翻轉修復的數據全路徑。
 
-## 🚀 核心技術與亮點 (Technical Highlights)
+## 核心技術與亮點 (Technical Highlights)
 * **RTOS 多工任務調度 (Multi-tasking Architecture)**
     * **Foreground Host Task:** 處理前端 I/O 請求與 LBA 分流，確保高響應即時性。
     * **Background GC Task:** 獨立低優先級任務，自動檢查各通道剩下的有效 block 數量，在系統閒置時非同步執行回收，避免寫入阻塞。
