@@ -941,7 +941,7 @@ void StartGCTask(void *argument)
   {
 	  for(int i = 0; i < NUM_CHANNELS; i++) {
 	      if (channels[i].fb_count < 2) {
-	          printf("\n[RTOS GC] Background Monitoring: Ch %d is low on space!\n", i);
+	          printf("\n[RTOS GC] Background Monitoring: Ch %d has %d blocks left!\n", i, channels[i].fb_count);
 	          run_gc_specific_channel(i);
 	      }
 	  }
